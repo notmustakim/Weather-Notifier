@@ -1,0 +1,60 @@
+name: Weather Notifier
+
+on:
+  schedule:
+    - cron: "30 */6 * * *"  # Every 6 hours at 30 minutes past
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Create config
+        env:
+          WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
+          LATITUDE: ${{ secrets.LATITUDE }}
+          LONGITUDE: ${{ secrets.LONGITUDE }}
+          EMAIL: ${{ secrets.WEATHER_NOTIFIER_EMAIL }}
+          RECEIVER: ${{ secrets.WEATHER_NOTIFIER_RECEIVER }}
+        run: |
+          python - <<'PY'
+          import json, os
+          config = {
+              "email": {
+                  "sender": os.environ["EMAIL"],
+                  "receiver": os.environ["RECEIVER"],
+                  "sender_name": "Weather Notifier",
+                  "smtp_server": "smtp.gmail.com",
+                  "smtp_port": 587
+              },
+              "weather": {
+                  "api_key": os.environ["WEATHER_API_KEY"],
+                  "latitude": float(os.environ["LATITUDE"]),
+                  "longitude": float(os.environ["LONGITUDE"])
+              },
+              "forecast_count": 6,
+              "timezone_offset": 6
+          }
+          with open("config.json", "w") as f:
+              json.dump(config, f, indent=4)
+          PY
+
+      - name: Run weather notifier
+        env:
+          WEATHER_NOTIFIER_SMTP_PASSWORD: ${{ secrets.WEATHER_NOTIFIER_SMTP_PASSWORD }}
+        run: python weather_notifier.py --once

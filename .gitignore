@@ -1,0 +1,22 @@
+# Secrets
+config.json
+
+# Logs
+*.log
+weather_notifier.log.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+.DS_Store

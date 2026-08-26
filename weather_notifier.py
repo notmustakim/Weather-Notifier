@@ -11,6 +11,8 @@ Features:
   - Runs once per day at a configurable local time (default 6:00 AM),
     and covers the *entire* calendar day's forecast, not just the next 24h
   - Exact forecast slot times shown for each rain period, with intensity & chance
+  - Deduplication: won't re-send the same forecast twice for the same day
+  - Atomic state writes
   - Responsive, table-based HTML email that renders correctly in Outlook/Gmail
 
 Deployment note: two ways to get the "once a day" behavior:
@@ -24,6 +26,7 @@ Deployment note: two ways to get the "once a day" behavior:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -196,7 +199,8 @@ class WeatherNotifier:
         # forecast data through the end of that same calendar day; entries
         # outside "today" get filtered out in analyze_weather_conditions().
         self.forecast_count = int(self.config.get("forecast_count", 14))
-        self.min_pop = float(self.config.get("min_pop", 0.0))  # ignore forecasts below this rain chance
+        self.min_pop = float(self.config.get("min_pop", 0.3))  # ignore forecasts below this rain chance
+        self.state_file = self.config.get("state_file", "state.json")
         self.weather_endpoint = "https://api.openweathermap.org/data/2.5/forecast"
 
         scheduling_cfg = self.config.get("scheduling", {})
@@ -213,14 +217,19 @@ class WeatherNotifier:
                 f"scheduling.daily_time must be 'HH:MM' 24-hour format, got: {self.daily_time_str!r}"
             ) from e
 
+        # --- FIX: Timezone with whitespace handling and fallback ---
         tz_name = self._env_override("WEATHER_NOTIFIER_TIMEZONE", scheduling_cfg.get("timezone", "UTC"))
+        tz_name = tz_name.strip()  # Remove any whitespace/newlines
+
+        if not tz_name:
+            tz_name = "UTC"
+            self.logger.warning("No timezone provided, defaulting to UTC")
+
         try:
             self.schedule_tz = ZoneInfo(tz_name)
-        except ZoneInfoNotFoundError as e:
-            raise ConfigError(
-                f"scheduling.timezone {tz_name!r} is not a recognized IANA timezone "
-                f"(e.g. 'Asia/Dhaka', 'UTC')."
-            ) from e
+        except (ZoneInfoNotFoundError, ValueError) as e:
+            self.logger.warning(f"Invalid timezone '{tz_name}': {e}. Falling back to UTC.")
+            self.schedule_tz = ZoneInfo("UTC")
 
     def _build_session(self) -> requests.Session:
         session = requests.Session()
@@ -302,6 +311,36 @@ class WeatherNotifier:
             self.logger.info("No rain expected")
 
         return periods
+
+    # ---- deduplication ------------------------------------------------------ #
+
+    def _signature(self, periods: list[RainPeriod]) -> str:
+        raw = "|".join(f"{p.time.isoformat()}-{p.label}" for p in periods)
+        return hashlib.sha256(raw.encode()).hexdigest()
+
+    def _load_last_signature(self) -> str | None:
+        path = Path(self.state_file)
+        if not path.exists():
+            return None
+        try:
+            with open(path, "r") as f:
+                return json.load(f).get("signature")
+        except (json.JSONDecodeError, OSError) as e:
+            self.logger.warning(f"Could not read state file, ignoring: {e}")
+            return None
+
+    def _save_signature(self, signature: str) -> None:
+        path = Path(self.state_file)
+        tmp_path = path.with_suffix(path.suffix + ".tmp")
+        payload = {"signature": signature, "updated_at": datetime.now(timezone.utc).isoformat()}
+        try:
+            with open(tmp_path, "w") as f:
+                json.dump(payload, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)  # atomic on POSIX and Windows
+        except OSError as e:
+            self.logger.warning(f"Could not persist state file: {e}")
 
     # ---- email formatting -------------------------------------------------- #
 
@@ -467,9 +506,15 @@ class WeatherNotifier:
             self.logger.info("No rain expected. No email sent.")
             return
 
+        signature = self._signature(periods)
+        if signature == self._load_last_signature():
+            self.logger.info("Same rain forecast as last notified run — skipping duplicate email.")
+            return
+
         subject, html_body, plain_text = self.prepare_email_content(periods)
         self.logger.info("Rain expected. Sending email alert...")
-        self.send_email(subject, html_body, plain_text)
+        if self.send_email(subject, html_body, plain_text):
+            self._save_signature(signature)
 
     def run_once(self) -> None:
         self._log_startup_banner()
@@ -487,7 +532,11 @@ class WeatherNotifier:
 
     def _next_run_time(self) -> datetime:
         now = datetime.now(self.schedule_tz)
-        candidate = now.replace(hour=self.daily_hour, minute=self.daily_minute, second=0, microsecond=0)
+        try:
+            candidate = now.replace(hour=self.daily_hour, minute=self.daily_minute, second=0, microsecond=0)
+        except ValueError:
+            # DST transition day – jump to next day instead
+            candidate = (now + timedelta(days=1)).replace(hour=self.daily_hour, minute=self.daily_minute, second=0, microsecond=0)
         if candidate <= now:
             candidate += timedelta(days=1)
         return candidate

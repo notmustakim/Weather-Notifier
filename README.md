@@ -7,7 +7,7 @@ A Python-based notifier that checks weather forecasts once a day and sends email
 - 🌧️ **Rain Detection**: Monitors OpenWeatherMap forecast for rain conditions (drizzle, light rain, heavy rain, thunderstorms, freezing rain)
 - 📧 **Email Alerts**: Beautiful HTML email with exact rain times, intensity, chance percentage, and temperature
 - 📊 **Detailed Forecast**: Each rain period shows time, rain type, chance (%), and temperature
-- 🕐 **Once Daily**: Runs once per day via GitHub Actions (6 AM Bangladesh time by default)
+- 🕐 **Once Daily**: Runs once per day via GitHub Actions (UTC Midnight/6 AM Bangladesh time by default)
 - 🔐 **Secure Configuration**: Environment variables for sensitive data (API keys, passwords)
 - 📝 **Comprehensive Logging**: Console + rotating file logs
 - 🚀 **GitHub Actions Ready**: Pre-configured workflow for automated daily runs
@@ -26,8 +26,8 @@ A Python-based notifier that checks weather forecasts once a day and sends email
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/weather-notifier.git
-cd weather-notifier
+git clone https://github.com/notmustakim/Weather-Notifier.git
+cd Weather-Notifier
 ```
 
 2. Install dependencies:
@@ -47,7 +47,7 @@ pip install -r requirements.txt
     },
     "weather": {
         "api_key": "your-openweathermap-api-key",
-        "latitude": 24.3746,
+        "latitude": 24.6476,
         "longitude": 88.6004
     },
     "forecast_count": 14,

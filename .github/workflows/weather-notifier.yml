@@ -2,11 +2,11 @@ name: Weather Notifier
 
 on:
   schedule:
-    - cron: "30 */6 * * *"  # Every 6 hours at 30 minutes past
-  workflow_dispatch:
+    - cron: "0 0 * * *"   # Runs at midnight UTC = 6 AM Bangladesh time
+  workflow_dispatch:      # Allows manual trigger
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   notify:
@@ -26,11 +26,12 @@ jobs:
 
       - name: Create config
         env:
+          EMAIL: ${{ secrets.WEATHER_NOTIFIER_EMAIL }}
+          RECEIVER: ${{ secrets.WEATHER_NOTIFIER_RECEIVER }}
           WEATHER_API_KEY: ${{ secrets.WEATHER_API_KEY }}
           LATITUDE: ${{ secrets.LATITUDE }}
           LONGITUDE: ${{ secrets.LONGITUDE }}
-          EMAIL: ${{ secrets.WEATHER_NOTIFIER_EMAIL }}
-          RECEIVER: ${{ secrets.WEATHER_NOTIFIER_RECEIVER }}
+          TIMEZONE: ${{ secrets.TIMEZONE }}
         run: |
           python - <<'PY'
           import json, os
@@ -47,8 +48,12 @@ jobs:
                   "latitude": float(os.environ["LATITUDE"]),
                   "longitude": float(os.environ["LONGITUDE"])
               },
-              "forecast_count": 6,
-              "timezone_offset": 6
+              "forecast_count": 14,
+              "min_pop": 0.3,
+              "scheduling": {
+                  "daily_time": "06:00",
+                  "timezone": os.environ.get("TIMEZONE", "Asia/Dhaka")
+              }
           }
           with open("config.json", "w") as f:
               json.dump(config, f, indent=4)
@@ -58,3 +63,10 @@ jobs:
         env:
           WEATHER_NOTIFIER_SMTP_PASSWORD: ${{ secrets.WEATHER_NOTIFIER_SMTP_PASSWORD }}
         run: python weather_notifier.py --once
+
+      - name: Upload logs (if failed)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: weather-notifier-logs
+          path: weather_notifier.log
